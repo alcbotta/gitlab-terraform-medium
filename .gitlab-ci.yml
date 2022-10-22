@@ -1,0 +1,68 @@
+# Reference:
+# https://docs.gitlab.com/ee/user/infrastructure/iac/terraform_state.html#get-started-using-gitlab-ci
+# https://docs.gitlab.com/ee/user/infrastructure/iac/mr_integration.html
+image: registry.gitlab.com/gitlab-org/terraform-images/stable:latest
+
+workflow:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      variables:
+        ENV: "prod"
+    - if: $CI_COMMIT_BRANCH == "develop"
+      variables:
+        ENV: "dev"
+
+variables:
+  TF_ROOT: ${CI_PROJECT_DIR}
+  TF_ADDRESS: ${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/terraform/state/${ENV}_state
+  TF_VAR_AWS_ACCESS_KEY: ${AWS_ACCESS_KEY}
+  TF_VAR_AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+  TF_VAR_AWS_REGION: ${AWS_REGION}
+
+cache:
+  key: ${ENV}_state
+  paths:
+    - ${TF_ROOT}/.terraform
+
+
+before_script:
+  - cd ${TF_ROOT}
+  - echo ${ENV}
+  - echo ${TF_ADDRESS}
+
+stages:
+  - prepare
+  - validate
+  - build
+  - deploy
+
+
+init:
+  stage: prepare
+  script:
+    - gitlab-terraform init 
+
+validate:
+  stage: validate
+  script:
+    - gitlab-terraform validate
+
+plan:
+  stage: build
+  script:
+    - gitlab-terraform plan -var-file=config/${ENV}.tfvars 
+    - gitlab-terraform plan-json -var-file=config/${ENV}.tfvars
+  artifacts:
+    name: plan
+    paths:
+      - ${TF_ROOT}/plan.cache
+    reports:
+      terraform:  ${TF_ROOT}/plan.json
+
+apply:
+  stage: deploy
+  script:
+    - gitlab-terraform apply
+  dependencies:
+    - plan
+  when: manual
